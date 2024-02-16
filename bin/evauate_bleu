@@ -1,0 +1,36 @@
+#!/bin/bash
+set -euo pipefail
+
+stage="$1"
+#model="$2"
+#sourcelanguages="$3"
+#targetlanguages="$4"
+sourcelanguages="$2"
+targetlanguages="$3"
+
+dsets="${dsets:-dev test}"
+
+eval_dir="data/parallel"
+translations_dir="translations/$stage"
+result_dir="scores/$stage"
+model="models/${stage}_avg.pt"
+
+mkdir -p "$translations_dir" "$result_dir"
+for src in $sourcelanguages; do
+    for tgt in $targetlanguages; do
+        [[ $src = "$tgt" ]] && continue
+
+        #echo "$src-$tgt" | tee -a "$result"
+        echo "$src-$tgt"
+        for dset in $dsets; do
+            [[ -f $eval_dir/$dset.$src-$tgt.$src ]] || continue
+
+            input="$eval_dir/$dset.$src-$tgt.$src"
+            reference="$eval_dir/$dset.$src-$tgt.$tgt"
+            output="$translations_dir/$dset.$src-$tgt.$tgt.pred"
+            result="$result_dir/$dset.$src-$tgt.jsonl"
+            translate "$model" "$src" "$tgt" < "$input" > "$output"
+            python -m sacrebleu -l "$src-$tgt" "$reference" -m bleu chrf --chrf-word-order 2 < "$output" | tee -a "$result"
+        done
+    done
+done

@@ -1,0 +1,5 @@
+[submodule "seq2seq-con"]
+	path = seq2seq-con
+[submodule "fastText"]
+	path = fastText
+	url = https://github.com/facebookresearch/fastText

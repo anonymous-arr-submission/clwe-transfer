@@ -1,0 +1,21 @@
+#!/bin/bash
+set -euo pipefail
+
+stage="$1"
+languages="$2"
+
+dsets="train dev"
+
+input_dir="monolingual"
+output_dir="corpus"
+
+mkdir -p "$output_dir"
+for lng in $languages; do
+    for dset in $dsets; do
+        cat "$input_dir/$dset.$lng" | preprocess_source_data "$lng" "$lng" >> "$output_dir/$dset.$stage.src"
+        cat "$input_dir/$dset.$lng" | preprocess_target_data "$lng" "$lng" >> "$output_dir/$dset.$stage.tgt"
+    done
+done
+
+echo "shuffling..."
+shuffle_corpus "$output_dir/train.$stage"

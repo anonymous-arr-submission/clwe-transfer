@@ -1,0 +1,26 @@
+#!/bin/bash
+set -euo pipefail
+
+stage="$1"
+sourcelanguages="$2"
+targetlanguages="$3"
+
+dsets="train dev"
+
+input_dir="parallel"
+output_dir="corpus"
+
+mkdir -p "$output_dir"
+for src in $sourcelanguages; do
+    for tgt in $targetlanguages; do
+        [[ $src = "$tgt" ]] && continue
+        echo "processing $src-$tgt"
+        for dset in $dsets; do
+            cat "$input_dir/$dset.$src-$tgt.$src" | preprocess_source_data "$src" "$tgt" >> "$output_dir/$dset.$stage.src"
+            cat "$input_dir/$dset.$src-$tgt.$tgt" | preprocess_target_data "$src" "$tgt" >> "$output_dir/$dset.$stage.tgt"
+        done
+    done
+done
+
+echo "shuffling..."
+shuffle_corpus "$output_dir/train.$stage"

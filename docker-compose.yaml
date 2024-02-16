@@ -1,0 +1,17 @@
+version: "3.3"
+
+services:
+  stage1:
+    image: "clwe-transfer-stage1:0.2.2"
+    build: .
+    shm_size: "8gb"
+    volumes:
+      - "${RUN_DIR}/dvc-cache:/src/.dvc/cache"
+      - "${RUN_DIR}/embeddings:/src/embeddings"
+      - "${RUN_DIR}/data:/src/data"
+      - "${RUN_DIR}/models:/src/models"
+      - "${RUN_DIR}/saves:/src/saves"
+      - "${RUN_DIR}/metrics:/src/metrics"
+      - "${RUN_DIR}/translations:/src/translations"
+      - "${RUN_DIR}/scores:/src/scores"
+      - "./config:/src/config:ro"

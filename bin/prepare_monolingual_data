@@ -1,0 +1,22 @@
+#!/bin/bash
+set -euo pipefail
+
+languages="$1"
+dsets="${dsets:-train}"
+
+input_dir="extracted"
+output_dir="monolingual"
+
+
+filter() {
+    # TODO smartcase
+    grep -v -E '_ ?_ ?NULL ?_ ?_'
+}
+
+mkdir -p "$output_dir"
+for dset in $dsets; do
+    for lng in $languages; do
+        cat "$input_dir/$dset.$lng" |
+            filter > "$output_dir/$dset.$lng"
+    done
+done

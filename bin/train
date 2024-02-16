@@ -1,0 +1,26 @@
+#!/bin/bash
+set -euo pipefail
+
+stage="$1"
+model="$2"
+trainconfig="$3"
+shift 3
+additional_args=("$@")
+
+save_dir="saves/$stage"
+model_dir="models/$stage"
+config_dir="config/$stage"
+log_dir="logs/$stage"
+
+mkdir -p "$model_dir" "$log_dir"
+
+# `${additional_args[@]+"${additional_args[@]}"}` is an ugly workaround for
+# the expansion of empty arrays failing in older versions of Bash (see
+# https://stackoverflow.com/questions/7577052/bash-empty-array-expansion-with-set-u/61551944#61551944)
+onmt_train \
+    -data "$save_dir/data" \
+    -save_model "$model_dir/$model" \
+    -gpu_ranks 0 \
+    -config "$config_dir/$trainconfig.yml" \
+    ${additional_args[@]+"${additional_args[@]}"} 2>&1 |
+        tee "$log_dir/training.$stage.$model.log"

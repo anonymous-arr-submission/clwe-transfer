@@ -1,0 +1,9 @@
+#!/bin/bash
+set -euo pipefail
+
+reference="$1"
+
+perl -CSAD -lne '
+    BEGIN { $count = 0; }
+    $count += 1 if / [[:punct:]] *$/;
+    END { exit 1 if $count < 100; }' < "$reference"

@@ -1,0 +1,46 @@
+#!/bin/bash
+set -euo pipefail
+
+embedding_dir="data/embeddings"
+
+#model="$1"
+#src="$2"
+#tgt="$3"
+model="$1"
+#input="$2"
+#output="$3"
+src="$2"
+tgt="$3"
+
+GPU=${GPU:-0}
+beamsize=${beamsize:-1}
+batchsize=${batchsize:-4000}
+
+input=$(mktemp)
+input_tok=$(mktemp)
+output=$(mktemp)
+embeddings=$(mktemp)
+
+cat >> "$input"
+is_tokenized "$input" &&
+    cat < "$input" > "$input_tok" ||
+    sacremoses tokenize < "$input" > "$input_tok"
+
+onmt_translate \
+    -batch_type tokens \
+    -batch_size "$batchsize" \
+    -beam_size "$beamsize" \
+    -gpu "$GPU" \
+    -model "$model" \
+    -src <(preprocess_source_data "$src" "$tgt" < "$input_tok") \
+    -output "$output" \
+    -src_embeddings <(dataset_to_embeddings "$src" < "$input_tok") \
+    -tgt_embeddings "$embedding_dir/embeddings.$tgt.vec" 1>&2
+
+
+if is_tokenized "$input"; then
+    postprocess.py $tgt < "$output"
+else
+    postprocess.py $tgt < "$output" |
+        sacremoses detokenize
+fi

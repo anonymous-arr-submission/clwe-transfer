@@ -1,0 +1,241 @@
+vars:
+  - stage: newlang
+  - baselanguages_list: ["en", "de", "es", "fr", "it"]
+  - baselanguages: "en de es fr it"
+  - newlanguage: "pt"
+  - clwepivot: "en"
+  - embdim: 300
+  - model: "continuous"
+  - baseconfig: "train-base"
+  - basemodel: "models/base_avg.pt"
+  - autoencoderconfig: "train"
+  - backtranslationconfig: "train"
+
+stages:
+  # set_stage "newlang"
+  #download_embeddings:
+  #  cmd: download_embeddings "${newlanguage}"
+  #  wdir: "embeddings/models"
+  #  deps:
+  #  - "/dev/null"
+  #  outs:
+  #  - "./"
+  download_embeddings:
+    cmd: download_embeddings "${newlanguage}"
+    wdir: "embeddings/models"
+    deps: []
+    outs:
+    - "cc.${newlanguage}.${embdim}.vec"
+    - "cc.${newlanguage}.${embdim}.bin"
+
+  compute_alignments:
+    cmd: compute_alignments "${clwepivot}" "${newlanguage}"
+    wdir: "embeddings"
+    deps:
+    - "models/cc.${newlanguage}.${embdim}.vec"
+    outs:
+    #- "dicts/"
+    - "align/aligned.${newlanguage}.vec-mat"
+
+  extract_data:
+    cmd: extract_data "${newlanguage}"
+    wdir: "data"
+    deps:
+    - "ted_talks.tar.gz"
+    outs:
+    - "extracted/train.${newlanguage}"
+    - "extracted/dev.${newlanguage}"
+    - "extracted/test.${newlanguage}"
+
+  prepare_monolingual_data:
+    cmd: dsets="train dev" prepare_monolingual_data "${newlanguage}"
+    wdir: "data"
+    deps:
+    - "extracted/train.${newlanguage}"
+    - "extracted/dev.${newlanguage}"
+    - "extracted/test.${newlanguage}"
+    outs:
+    - "monolingual/"
+
+  build_embeddings:
+    cmd: build_embeddings "${newlanguage}"
+    deps:
+    #- "extract-words.py"
+    - "data/monolingual/train.${newlanguage}"
+    - "embeddings/align/aligned.${newlanguage}.vec-mat"
+    - "embeddings/models/cc.${newlanguage}.${embdim}.vec"
+    - "embeddings/models/cc.${newlanguage}.${embdim}.bin"
+    outs:
+    - "data/embeddings/embeddings.${newlanguage}.vec"
+
+  # set_stage "blindenc"
+  prepare_parallel_data:
+    foreach: ${baselanguages_list}
+    do:
+      cmd: prepare_parallel_data "test" "${item} ${newlanguage}"
+      wdir: "data"
+      deps:
+      - "extracted/"
+      outs:
+      #- "parallel/"
+      - "parallel/test.${item}-${newlanguage}.${newlanguage}"
+      - "parallel/test.${item}-${newlanguage}.${item}"
+      - "parallel/test.${newlanguage}-${item}.${newlanguage}"
+      - "parallel/test.${newlanguage}-${item}.${item}"
+
+  evauate_bleu_blindenc:
+    foreach: ${baselanguages_list}
+    do:
+      cmd: ln -sf "${basemodel}" "models/blindenc_avg.pt" && evauate_bleu "blindenc" "${newlanguage}" "${item}"
+      deps:
+      #- "models/blindenc_avg.pt"
+      - "${basemodel}"
+      #- "data/eval/"
+      #- "data/parallel/"
+      - "data/parallel/test.${newlanguage}-${item}.${newlanguage}"
+      - "data/parallel/test.${newlanguage}-${item}.${item}"
+      - "data/embeddings/"
+      outs:
+      #- "translations/blindenc/"
+      - "translations/blindenc/test.${newlanguage}-${item}.${item}.pred"
+      #- "scores/blindenc/"
+      - "scores/blindenc/test.${newlanguage}-${item}.jsonl"
+
+  evauate_bleu_blinddec:
+    foreach: ${baselanguages_list}
+    do:
+      cmd: ln -sf "${basemodel}" "models/blinddec_avg.pt" && evauate_bleu "blinddec" "${baselanguages}" "${newlanguage}"
+      deps:
+      #- "models/blinddec_avg.pt"
+      - "${basemodel}"
+      #- "data/eval/"
+      #- "data/parallel/"
+      - "data/parallel/test.${item}-${newlanguage}.${newlanguage}"
+      - "data/parallel/test.${item}-${newlanguage}.${item}"
+      - "data/embeddings/"
+      outs:
+      #- "translations/blinddec/"
+      - "translations/blinddec/test.${newlanguage}-${item}.${item}.pred"
+      #- "scores/blinddec/"
+      - "scores/blinddec/test.${newlanguage}-${item}.jsonl"
+
+  # set_stage "autoencoder"
+  build_newlang_vocab:
+    cmd: build_newlang_vocab "autoencoder" "${basemodel}" "${newlanguage}" "${newlanguage}"
+    deps:
+    - "${basemodel}"
+    - "data/embeddings/"
+    outs:
+    - "saves/autoencoder.vocab.pt"
+    #- "saves/autoencoder.specials.pt"
+
+  concat_autoencoding_corpus:
+    cmd: concat_autoencoding_corpus "autoencoder" "${newlanguage}"
+    wdir: "data"
+    deps:
+    - "monolingual/"
+    outs:
+    #- "corpus/"
+    - "corpus/train.autoencoder.src"
+    - "corpus/train.autoencoder.tgt"
+    - "corpus/dev.autoencoder.src"
+    - "corpus/dev.autoencoder.tgt"
+
+  preprocess_reuse_vocab:
+    cmd: preprocess_reuse_vocab "autoencoder" "saves/autoencoder.vocab.pt"
+    deps:
+    - "data/corpus/train.autoencoder.src"
+    - "data/corpus/train.autoencoder.tgt"
+    - "data/corpus/dev.autoencoder.src"
+    - "data/corpus/dev.autoencoder.tgt"
+    - "saves/autoencoder.vocab.pt"
+    outs:
+    - "saves/autoencoder/"
+
+  train_continue_autoencode:
+    cmd: train_continue "autoencoder" "${model}" "${autoencoderconfig}" "${basemodel}"
+    deps:
+    - "saves/autoencoder/"
+    - "${basemodel}"
+    outs:
+    - "models/autoencoder/"
+    metrics:
+    - "logs/autoencoder/"
+
+  average_models_autoencode:
+    cmd: onmt_average_models -m models/autoencoder/*.pt -o models/autoencoder_avg.pt
+    deps:
+    - "models/autoencoder/"
+    outs:
+    - "models/autoencoder_avg.pt"
+
+  evauate_bleu_autoencode:
+    foreach: ${baselanguages_list}
+    do:
+      cmd: evauate_bleu "autoencoder" "${item}" "${newlanguage}"
+      deps:
+      - "models/autoencoder_avg.pt"
+      - "data/parallel/test.${item}-${newlanguage}.${newlanguage}"
+      - "data/parallel/test.${item}-${newlanguage}.${item}"
+      outs:
+      - "translations/autoencoder/test.${item}-${newlanguage}.${newlanguage}.pred"
+      - "scores/autoencoder/test.${item}-${newlanguage}.jsonl"
+
+  backtranslation_round_round1:
+    cmd: freezeenc=y backtranslation_round "${basemodel}" "${basemodel}" "${baselanguages}" "${newlanguage}" "bt1"
+    deps:
+    # baselanguage embeddings should also be depended on
+    - "data/embeddings/embeddings.${newlanguage}.vec"
+    - "${basemodel}"
+    - "config/bt1/${backtranslationconfig}.yml"
+    outs:
+    - "data/corpus/train.bt1.src"
+    - "data/corpus/train.bt1.tgt"
+    - "data/corpus/dev.bt1.src"
+    - "data/corpus/dev.bt1.tgt"
+    - "models/bt1_avg.pt"
+    - "saves/bt1.vocab.pt"
+    - "logs/bt1/training.bt1.${model}.log"
+
+  evauate_bleu_backtranslation_round1:
+    foreach: ${baselanguages_list}
+    do:
+      cmd: evauate_bleu "bt1" "${item}" "${newlanguage}"
+      deps:
+      - "data/embeddings/embeddings.${newlanguage}.vec"
+      - "data/parallel/test.${item}-${newlanguage}.${newlanguage}"
+      - "data/parallel/test.${item}-${newlanguage}.${item}"
+      - "models/bt1_avg.pt"
+      outs:
+      - "translations/bt1/test.${item}-${newlanguage}.${newlanguage}.pred"
+      - "scores/bt1/test.${item}-${newlanguage}.jsonl"
+
+  backtranslation_round_round2:
+    cmd: freezeenc= backtranslation_round "${basemodel}" "models/bt1_avg.pt" "${newlanguage}" "${baselanguages}" "bt2"
+    deps:
+    # baselanguage embeddings should also be depended on
+    - "data/embeddings/embeddings.${newlanguage}.vec"
+    - "${basemodel}"
+    - "models/bt1_avg.pt"
+    - "config/bt2/${backtranslationconfig}.yml"
+    outs:
+    - "data/corpus/train.bt2.src"
+    - "data/corpus/train.bt2.tgt"
+    - "data/corpus/dev.bt2.src"
+    - "data/corpus/dev.bt2.tgt"
+    - "models/bt2_avg.pt"
+    - "saves/bt2.vocab.pt"
+    - "logs/bt2/training.bt2.${model}.log"
+
+  evauate_bleu_backtranslation_round2:
+    foreach: ${baselanguages_list}
+    do:
+      cmd: evauate_bleu "bt2" "${newlanguage}" "${item}"
+      deps:
+      - "data/embeddings/embeddings.${newlanguage}.vec"
+      - "data/parallel/test.${item}-${newlanguage}.${newlanguage}"
+      - "data/parallel/test.${item}-${newlanguage}.${item}"
+      - "models/bt2_avg.pt"
+      outs:
+      - "translations/bt2/test.${item}-${newlanguage}.${newlanguage}.pred"
+      - "scores/bt2/test.${item}-${newlanguage}.jsonl"

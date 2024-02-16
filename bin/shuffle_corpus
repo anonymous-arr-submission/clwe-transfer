@@ -1,0 +1,11 @@
+#!/bin/bash
+set -euo pipefail
+
+prefix="$1"
+
+paste "$prefix.src" "$prefix.tgt" |
+    shuf |
+    unpaste "$prefix.shuf.src" "$prefix.shuf.tgt"
+
+mv "$prefix.shuf.src" "$prefix.src"
+mv "$prefix.shuf.tgt" "$prefix.tgt"

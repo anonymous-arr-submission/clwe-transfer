@@ -1,0 +1,79 @@
+#!/bin/bash
+set -euo pipefail
+
+backtranslate() {
+    local src tgt dset
+    local model="$1"
+    local sourcelanguages="$2"
+    local targetlanguages="$3"
+    local monodir="data/monolingual"
+
+    for dset in train dev; do
+        rm -f "$datadir/$dset.$stage.tgt"
+        rm -f "$datadir/$dset.$stage.src"
+
+        for src in $sourcelanguages; do
+            for tgt in $targetlanguages; do
+                [[ $src = "$tgt" ]] && continue
+
+                input="$monodir/$dset.$src"
+                beamsize=4 translate "$model" "$src" "$tgt" < "$input" |
+                    preprocess_source_data "$tgt" "$src" >> "$datadir/$dset.$stage.src"
+
+                cat "$input" |
+                    preprocess_target_data "$tgt" "$src" >> "$datadir/$dset.$stage.tgt"
+            done
+        done
+    done
+
+    shuffle_corpus "$datadir/train.$stage"
+}
+
+basemodel="$1"
+backtranslationmodel="$2"
+sourcelanguages="$3"
+targetlanguages="$4"
+stage="$5"
+
+datadir="data/corpus"
+
+# name of the model ... not so important actually since the averaged checkpoint
+# has a different name anyways
+model="continuous"
+# config filename inside config/$stage (without .yml extension)
+backtranslationconfig="train"
+
+# deps: data/monolingual/{train,dev}.$tgt
+# outs: data/corpus/{train,dev}.$stage.{src,tgt}
+backtranslate "$backtranslationmodel" "$targetlanguages" "$sourcelanguages"
+
+# deps: data/embeddings/embeddings.$lng.vec
+#       ${basemodel}
+# outs: saves/$stage.vocab.pt
+build_newlang_vocab "$stage" "$basemodel" "$sourcelanguages" "$targetlanguages"
+
+# deps: data/corpus/{train,dev}.$stage.{src,tgt}
+#       saves/data.vocab.pt
+# outs: saves/$stage/data.{train,valid}.[0-9]*.pt
+#       saves/$stage/data.vocab.pt
+#       saves/$stage/preprocess.log
+preprocess_reuse_vocab "$stage" "saves/$stage.vocab.pt"
+
+# deps: saves/$stage/data.{train,valid}.[0-9]*.pt
+#       saves/$stage.vocab.pt
+#       config/$stage/${backtranslationconfig}.yml
+#       ${basemodel}
+# outs: models/$stage/${model}_step_*.pt
+[[ $freezeenc ]] &&
+    train_continue "$stage" "$model" "$backtranslationconfig" "$basemodel" -freeze_encoder -train_steps 16000 ||
+    train_continue "$stage" "$model" "$backtranslationconfig" "$basemodel"
+
+# deps: models/$stage/${model}_step_*.pt
+# outs: models/${stage}_avg.pt
+onmt_average_models -m "models/$stage"/*.pt -o "models/${stage}_avg.pt"
+
+#rm -vf "$savedir"/data.train.[0-9]*.pt
+#rm -vf "$savedir"/data.valid.[0-9]*.pt
+#rm -vf "$savedir"/data.vocab.pt
+#rm -vf models/"$stage/${model}_step_"[0-9]*.pt
+#rmdir "models/$stage"
